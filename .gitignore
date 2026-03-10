@@ -1,0 +1,24 @@
+# OS
+.DS_Store
+
+# Build
+dist/
+build/
+*.egg-info/
+*.egg
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Editable install
+*.pth
+
+# Debug output
+debug_segments/
+
+# Example audio files
+examples/

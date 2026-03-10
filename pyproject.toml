@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sead"
+version = "0.1.0"
+description = "Sound Event Activity Detection (SEAD) - speech, music, others"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "onnxruntime>=1.19",
+    "torch>=1.12.0",
+    "torchaudio>=0.12.0",
+    "soundfile>=0.13",
+    "scipy>=1.10",
+]
+
+[project.urls]
+Homepage = "https://github.com/nguyenvulebinh/sead"
+Repository = "https://github.com/nguyenvulebinh/sead"
+Issues = "https://github.com/nguyenvulebinh/sead/issues"
+
+[project.optional-dependencies]
+onnx-gpu = ["onnxruntime-gpu>=1.19"]
+dev = ["pytest", "sounddevice"]
+
+[project.scripts]
+sead = "sead.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sead"]
