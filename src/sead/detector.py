@@ -1,5 +1,6 @@
 """Main SEAD detector: offline and streaming sound event detection."""
 
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -63,13 +64,12 @@ class SEADDetector:
         )
 
     def __del__(self) -> None:
-        if hasattr(self, "_tmpdir"):
-            import shutil
-
-            try:
+        """Clean up temp dir. Swallow all exceptions (Python may be shutting down)."""
+        try:
+            if hasattr(self, "_tmpdir") and self._tmpdir:
                 shutil.rmtree(self._tmpdir, ignore_errors=True)
-            except Exception:
-                pass
+        except BaseException:
+            pass
 
     def process_file(self, audio_path: Path) -> list[Segment]:
         """Process audio file offline. Returns list of segments."""
