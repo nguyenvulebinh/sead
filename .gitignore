@@ -22,3 +22,5 @@ debug_segments/
 
 # Example audio files
 examples/
+
+benchmarks/

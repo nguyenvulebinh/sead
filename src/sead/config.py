@@ -9,7 +9,7 @@ SAMPLE_RATE = 16000
 def _get_default_model_path() -> Path:
     """Load bundled model path via importlib.resources (portable across installs)."""
     package_path = "sead.data"
-    model_name = "YamNet_float.onnx.zip"
+    model_name = "YamNet_w8a8.onnx.zip"
     try:
         import importlib_resources as impresources
         return Path(impresources.files(package_path).joinpath(model_name))
@@ -21,6 +21,9 @@ def _get_default_model_path() -> Path:
 
 # Default model path (bundled in sead/data/)
 DEFAULT_MODEL_PATH = _get_default_model_path()
+
+# Default max CPU threads for ONNX and PyTorch (2 for streaming-friendly)
+DEFAULT_NUM_THREADS = 2
 
 
 def _get_default_class_map_path() -> Path:

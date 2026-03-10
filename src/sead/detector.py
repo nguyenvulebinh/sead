@@ -15,13 +15,14 @@ from sead.audio_utils import (
 )
 from sead.class_mapping import aggregate_to_target_classes
 from sead.config import (
+    DEFAULT_NUM_THREADS,
     EMA_ALPHA,
     MAX_GAP_SEC,
     MIN_DURATION_SEC,
     PATCH_HOP_SEC,
     Segment,
 )
-from sead.model_utils import extract_onnx_from_zip, run_yamnet_onnx
+from sead.model_utils import extract_onnx_from_zip, get_quantization_params, run_yamnet_onnx
 from sead.segment_builder import build_segments
 from sead.smoothing import EMASmoother
 from sead.temporal_decoder import TemporalDecoder
@@ -39,6 +40,7 @@ class SEADDetector:
         offset_threshold: float = 0.35,
         min_duration_sec: float = MIN_DURATION_SEC,
         max_gap_sec: float = MAX_GAP_SEC,
+        num_threads: int | None = DEFAULT_NUM_THREADS,
     ) -> None:
         self.ema_alpha = ema_alpha
         self.onset_threshold = onset_threshold
@@ -46,15 +48,33 @@ class SEADDetector:
         self.min_duration_sec = min_duration_sec
         self.max_gap_sec = max_gap_sec
 
+        if num_threads is not None:
+            try:
+                import torch
+                torch.set_num_threads(num_threads)
+            except ImportError:
+                pass
+
         self._tmpdir = tempfile.mkdtemp(prefix="sead_onnx_")
         onnx_path = extract_onnx_from_zip(
             Path(model_zip_path).expanduser().resolve(),
             Path(self._tmpdir),
         )
+
+        sess_options = None
+        if num_threads is not None:
+            sess_options = ort.SessionOptions()
+            sess_options.intra_op_num_threads = num_threads
+            sess_options.add_session_config_entry(
+                "session.intra_op.allow_spinning", "0"
+            )
+
         self._session = ort.InferenceSession(
             str(onnx_path),
+            sess_options=sess_options,
             providers=["CPUExecutionProvider"],
         )
+        self._quant_params = get_quantization_params(onnx_path) or None
 
         self._smoother = EMASmoother(ema_alpha, num_classes=3)
         self._decoder = TemporalDecoder(
@@ -83,7 +103,9 @@ class SEADDetector:
             patches = waveform_to_yamnet_patches(chunk)
             if patches.size == 0:
                 continue
-            logits = run_yamnet_onnx(self._session, patches)
+            logits = run_yamnet_onnx(
+                self._session, patches, quant_params=self._quant_params
+            )
             all_logits.append(logits)
 
         if not all_logits:
@@ -125,7 +147,9 @@ class SEADDetector:
         if patches.size == 0:
             return []
 
-        logits = run_yamnet_onnx(self._session, patches)
+        logits = run_yamnet_onnx(
+            self._session, patches, quant_params=self._quant_params
+        )
         probs = aggregate_to_target_classes(logits)
         smoothed = self._smoother.update(probs)
 
@@ -165,7 +189,9 @@ class SEADDetector:
         if patches.size == 0:
             return []
 
-        logits = run_yamnet_onnx(self._session, patches)
+        logits = run_yamnet_onnx(
+            self._session, patches, quant_params=self._quant_params
+        )
         probs = aggregate_to_target_classes(logits)
         smoothed = self._smoother.update(probs)
 

@@ -10,7 +10,7 @@ import numpy as np
 import soundfile as sf
 
 from sead.audio_utils import SAMPLE_RATE, load_audio_wav
-from sead.config import DEFAULT_MODEL_PATH
+from sead.config import DEFAULT_MODEL_PATH, PATCH_HOP_SEC
 from sead.detector import SEADDetector
 from sead.iterator import SEADIterator
 
@@ -135,7 +135,9 @@ def _run_synthetic_stream(
     window_samples = iterator.window_samples
     hop_samples = iterator.hop_samples
     start = 0
+    chunk_count = 0
 
+    t0 = time.perf_counter()
     while start < audio.shape[0]:
         end = min(start + window_samples, audio.shape[0])
         waveform = audio[start:end]
@@ -147,6 +149,7 @@ def _run_synthetic_stream(
                 constant_values=0,
             )
         segments = iterator(waveform)
+        chunk_count += 1
         all_segments.extend(segments)
         if on_event and segments:
             for s in segments:
@@ -158,6 +161,14 @@ def _run_synthetic_stream(
     if on_event and flushed:
         for s in flushed:
             on_event(s)
+    wall_time = time.perf_counter() - t0
+
+    print()
+    print("=== Report ===")
+    print(f"  Wall time:       {wall_time:.2f} s")
+    if chunk_count > 0:
+        print(f"  Chunks/sec:      {chunk_count / wall_time:.1f}")
+        print(f"  Latency (ms):    mean {wall_time / chunk_count * 1000:.1f}")
 
     if compare:
         offline = detector.process_file(audio_path)
@@ -245,10 +256,23 @@ def main() -> None:
     if not audio_path.exists():
         raise FileNotFoundError(f"Audio not found: {audio_path}")
 
+    with sf.SoundFile(str(audio_path)) as f:
+        audio_duration_sec = len(f) / f.samplerate
+    num_chunks = max(1, int((audio_duration_sec - 0.98) / PATCH_HOP_SEC) + 1)
+
+    t0 = time.perf_counter()
     segments = detector.process_file(audio_path)
+    wall_time = time.perf_counter() - t0
+
     print(f"Detected {len(segments)} segments:")
     for s in segments:
         print(s)
+
+    print()
+    print("=== Report ===")
+    print(f"  Wall time:       {wall_time:.2f} s")
+    print(f"  Chunks/sec:      {num_chunks / wall_time:.1f}")
+    print(f"  Latency (ms):    mean {wall_time / num_chunks * 1000:.1f}")
 
     if args.debug_dir:
         debug_path = Path(args.debug_dir).expanduser().resolve()

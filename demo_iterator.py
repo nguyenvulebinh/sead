@@ -9,6 +9,7 @@ Usage:
 """
 
 import argparse
+import time
 from pathlib import Path
 
 import numpy as np
@@ -32,7 +33,9 @@ def main() -> None:
     hop_samples = iterator.hop_samples
     all_segments = []
     buffer = np.array([], dtype=np.float32)
+    chunk_count = 0
 
+    t0 = time.perf_counter()
     with sf.SoundFile(str(audio_path)) as f:
         if f.samplerate != SAMPLE_RATE:
             raise ValueError(
@@ -49,19 +52,27 @@ def main() -> None:
                 window = buffer[:window_samples].copy()
                 buffer = buffer[hop_samples:]
                 segments = iterator(window)
+                chunk_count += 1
                 all_segments.extend(segments)
-                if len(segments) > 0: # print only if there are segments detected
+                if len(segments) > 0:
                     for s in segments:
                         print(s)
 
     flush_segments = iterator.flush()
-    if len(flush_segments) > 0: # print only if there are segments detected
+    if len(flush_segments) > 0:
         for s in flush_segments:
             print(s)
     all_segments.extend(flush_segments)
+    wall_time = time.perf_counter() - t0
 
     print(f"Processed {audio_path.name} with SEADIterator (streaming simulation)")
     print(f"Incremental events (start/end, VADIterator-style): {len(all_segments)}")
+    print()
+    print("=== Report ===")
+    print(f"  Wall time:       {wall_time:.2f} s")
+    if chunk_count > 0:
+        print(f"  Chunks/sec:      {chunk_count / wall_time:.1f}")
+        print(f"  Latency (ms):    mean {wall_time / chunk_count * 1000:.1f}")
 
 if __name__ == "__main__":
     main()
