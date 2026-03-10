@@ -70,11 +70,6 @@ for e in iterator.flush():
 - **Segments**: `[start_time, end_time, label, confidence]` with labels `speech`, `music`, `others`
 - **Events** (streaming): `{'start': t, 'label': str}` on onset, `{'end': t, 'label': str, 'confidence': float}` on offset
 
-## Development
+## Acknowledgement
 
-```bash
-git clone <repo>
-cd audio_tagging
-pip install -e ".[dev]"
-pytest src/sead/test_sead.py -v
-```
+SEAD uses [YamNet](https://huggingface.co/qualcomm/YamNet) by Qualcomm, an audio event classifier trained on the AudioSet dataset.
