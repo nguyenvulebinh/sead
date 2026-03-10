@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "sead"
-version = "0.1.1"
+version = "0.1.2"
 description = "Sound Event Activity Detection (SEAD) - speech, music, others"
 readme = "README.md"
 requires-python = ">=3.10"

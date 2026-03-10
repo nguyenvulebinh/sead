@@ -3,6 +3,7 @@
 import argparse
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -111,10 +112,14 @@ def _run_synthetic_stream(
     audio_path: Path,
     *,
     compare: bool = False,
+    on_event: Callable | None = None,
 ) -> list:
     """
     Simulate streaming by feeding a WAV file in chunks (window=0.98s, hop=0.48s).
     Uses SEADIterator for VADIterator-like streaming interface.
+
+    If on_event is provided, call it for each segment/event as it is detected
+    (enables real-time output during streaming).
     """
     audio, sr = load_audio_wav(audio_path)
     if sr != SAMPLE_RATE:
@@ -143,10 +148,16 @@ def _run_synthetic_stream(
             )
         segments = iterator(waveform)
         all_segments.extend(segments)
+        if on_event and segments:
+            for s in segments:
+                on_event(s)
         start += hop_samples
 
     flushed = iterator.flush()
     all_segments.extend(flushed)
+    if on_event and flushed:
+        for s in flushed:
+            on_event(s)
 
     if compare:
         offline = detector.process_file(audio_path)
@@ -224,10 +235,10 @@ def main() -> None:
             print(f"Streaming: {len(stream_segs)} segments")
             print(f"Offline:   {len(offline_segs)} segments")
         else:
-            stream_segs = _run_synthetic_stream(detector, audio_path)
+            stream_segs = _run_synthetic_stream(
+                detector, audio_path, on_event=print
+            )
             print(f"Synthetic streaming: {len(stream_segs)} events")
-            for s in stream_segs:
-                print(s)
         return
 
     audio_path = Path(args.audio).expanduser().resolve()

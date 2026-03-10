@@ -50,14 +50,18 @@ def main() -> None:
                 buffer = buffer[hop_samples:]
                 segments = iterator(window)
                 all_segments.extend(segments)
+                if len(segments) > 0: # print only if there are segments detected
+                    for s in segments:
+                        print(s)
 
-    all_segments.extend(iterator.flush())
+    flush_segments = iterator.flush()
+    if len(flush_segments) > 0: # print only if there are segments detected
+        for s in flush_segments:
+            print(s)
+    all_segments.extend(flush_segments)
 
     print(f"Processed {audio_path.name} with SEADIterator (streaming simulation)")
     print(f"Incremental events (start/end, VADIterator-style): {len(all_segments)}")
-    for e in all_segments:
-        print(e)
-
 
 if __name__ == "__main__":
     main()
