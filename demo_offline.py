@@ -11,13 +11,20 @@ from pathlib import Path
 
 import soundfile as sf
 
-from sead.config import DEFAULT_MODEL_PATH, PATCH_HOP_SEC
+from sead.config import DEFAULT_MODEL_PATH, DEFAULT_NUM_THREADS, PATCH_HOP_SEC
 from sead.detector import SEADDetector
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="SEAD offline demo")
     parser.add_argument("--audio", type=str, required=True, help="Path to WAV file")
+    parser.add_argument(
+        "--num-threads",
+        type=int,
+        default=None,
+        metavar="N",
+        help=f"Max CPU threads for inference (default: {DEFAULT_NUM_THREADS})",
+    )
     args = parser.parse_args()
 
     audio_path = Path(args.audio).expanduser().resolve()
@@ -29,7 +36,8 @@ def main() -> None:
 
     num_chunks = max(1, int((audio_duration_sec - 0.98) / PATCH_HOP_SEC) + 1)
 
-    detector = SEADDetector(DEFAULT_MODEL_PATH)
+    num_threads = args.num_threads if args.num_threads is not None else DEFAULT_NUM_THREADS
+    detector = SEADDetector(DEFAULT_MODEL_PATH, num_threads=num_threads)
     t0 = time.perf_counter()
     segments = detector.process_file(audio_path)
     wall_time = time.perf_counter() - t0

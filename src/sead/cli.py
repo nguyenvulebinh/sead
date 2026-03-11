@@ -10,7 +10,7 @@ import numpy as np
 import soundfile as sf
 
 from sead.audio_utils import SAMPLE_RATE, load_audio_wav
-from sead.config import DEFAULT_MODEL_PATH, PATCH_HOP_SEC
+from sead.config import DEFAULT_MODEL_PATH, DEFAULT_NUM_THREADS, PATCH_HOP_SEC
 from sead.detector import SEADDetector
 from sead.iterator import SEADIterator
 
@@ -115,8 +115,8 @@ def _run_synthetic_stream(
     on_event: Callable | None = None,
 ) -> list:
     """
-    Simulate streaming by feeding a WAV file in chunks (window=0.98s, hop=0.48s).
-    Uses SEADIterator for VADIterator-like streaming interface.
+    Simulate streaming by feeding a WAV file in hop-sized chunks.
+    SEADIterator buffers internally until a full window is available.
 
     If on_event is provided, call it for each segment/event as it is detected
     (enables real-time output during streaming).
@@ -132,24 +132,14 @@ def _run_synthetic_stream(
         detector, sampling_rate=SAMPLE_RATE, incremental=not compare
     )
     all_segments: list = []
-    window_samples = iterator.window_samples
     hop_samples = iterator.hop_samples
     start = 0
-    chunk_count = 0
 
     t0 = time.perf_counter()
     while start < audio.shape[0]:
-        end = min(start + window_samples, audio.shape[0])
-        waveform = audio[start:end]
-        if waveform.shape[0] < window_samples:
-            waveform = np.pad(
-                waveform,
-                (0, window_samples - waveform.shape[0]),
-                mode="constant",
-                constant_values=0,
-            )
+        end = min(start + hop_samples, audio.shape[0])
+        waveform = audio[start:end].astype(np.float32)
         segments = iterator(waveform)
-        chunk_count += 1
         all_segments.extend(segments)
         if on_event and segments:
             for s in segments:
@@ -162,13 +152,14 @@ def _run_synthetic_stream(
         for s in flushed:
             on_event(s)
     wall_time = time.perf_counter() - t0
+    frames_processed = iterator.frames_processed
 
     print()
     print("=== Report ===")
     print(f"  Wall time:       {wall_time:.2f} s")
-    if chunk_count > 0:
-        print(f"  Chunks/sec:      {chunk_count / wall_time:.1f}")
-        print(f"  Latency (ms):    mean {wall_time / chunk_count * 1000:.1f}")
+    if frames_processed > 0:
+        print(f"  Chunks/sec:      {frames_processed / wall_time:.1f}")
+        print(f"  Latency (ms):    mean {wall_time / frames_processed * 1000:.1f}")
 
     if compare:
         offline = detector.process_file(audio_path)
@@ -212,13 +203,21 @@ def main() -> None:
         action="store_true",
         help="With --stream-file: print streaming vs offline comparison",
     )
+    parser.add_argument(
+        "--num-threads",
+        type=int,
+        default=None,
+        metavar="N",
+        help=f"Max CPU threads for inference (default: {DEFAULT_NUM_THREADS})",
+    )
     args = parser.parse_args()
 
     model_path = Path(args.model_zip).expanduser()
     if not model_path.exists():
         raise FileNotFoundError(f"Model not found: {model_path}")
 
-    detector = SEADDetector(model_path)
+    num_threads = args.num_threads if args.num_threads is not None else DEFAULT_NUM_THREADS
+    detector = SEADDetector(model_path, num_threads=num_threads)
 
     if args.stream:
         _run_stream(detector)

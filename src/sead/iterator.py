@@ -1,6 +1,9 @@
 """
 Streaming iterator for SEAD.
 
+Accepts arbitrary-sized audio chunks; buffers internally until a full window
+is available. Caller can feed chunks as they arrive (e.g. from mic or network).
+
 Usage:
     iterator = SEADIterator(detector)
     for chunk in audio_chunks:
@@ -14,7 +17,7 @@ from pathlib import Path
 
 import numpy as np
 
-from sead.config import PATCH_HOP_SEC, SAMPLE_RATE
+from sead.config import DEFAULT_NUM_THREADS, PATCH_HOP_SEC, SAMPLE_RATE
 from sead.detector import SEADDetector
 
 
@@ -22,8 +25,8 @@ class SEADIterator:
     """
     Streaming iterator for sound event detection.
 
-    feed audio chunks, get completed
-    segments as they are detected. Tracks frame index internally.
+    Accepts arbitrary-sized audio chunks. Buffers internally until a full
+    window (window_samples) is available, then processes and advances by hop.
 
     Parameters
     ----------
@@ -38,6 +41,9 @@ class SEADIterator:
     incremental : bool (default True)
         If True, return start/end events like VADIterator (better for streaming).
         If False, return full segments when event ends.
+    num_threads : int | None (default None)
+        Max CPU threads for ONNX inference. If None, uses DEFAULT_NUM_THREADS.
+        Only used when detector is a Path (creates SEADDetector internally).
     """
 
     def __init__(
@@ -48,9 +54,11 @@ class SEADIterator:
         window_seconds: float = 0.98,
         hop_seconds: float = PATCH_HOP_SEC,
         incremental: bool = True,
+        num_threads: int | None = None,
     ) -> None:
         if isinstance(detector, Path):
-            self._detector = SEADDetector(detector)
+            threads = num_threads if num_threads is not None else DEFAULT_NUM_THREADS
+            self._detector = SEADDetector(detector, num_threads=threads)
         else:
             self._detector = detector
         self.sampling_rate = sampling_rate
@@ -66,6 +74,8 @@ class SEADIterator:
         self._detector.reset_stream()
         self._frame_idx = 0
         self._current_sample = 0
+        self._buffer = np.array([], dtype=np.float32)
+        self._frames_processed = 0
 
     def __call__(
         self,
@@ -73,13 +83,14 @@ class SEADIterator:
         return_seconds: bool = True,
     ) -> list:
         """
-        Process one audio chunk.
+        Process one audio chunk. Chunk may be any size; buffering is handled
+        internally. Returns segments/events for all windows processed in this call.
 
         Parameters
         ----------
         x : np.ndarray
             Audio chunk, shape (n_samples,) or (n_samples, 1).
-            Float32 in [-1, 1]. Length should be window_samples (0.98s at 16kHz).
+            Float32 in [-1, 1]. Arbitrary length.
         return_seconds : bool (default True)
             Segments use seconds; if False, use sample indices (not implemented)
 
@@ -95,32 +106,70 @@ class SEADIterator:
             x = x.reshape(-1)
         x = x.astype(np.float32)
 
-        if x.shape[0] < self.window_samples:
-            pad = np.zeros(self.window_samples - x.shape[0], dtype=np.float32)
-            x = np.concatenate([x, pad])
+        self._buffer = np.concatenate([self._buffer, x])
+        all_results: list = []
 
-        if self.incremental:
-            result = self._detector.process_stream_events(
-                x, start_frame=self._frame_idx
-            )
-        else:
-            result = self._detector.process_stream(x, start_frame=self._frame_idx)
+        while len(self._buffer) >= self.window_samples:
+            window = self._buffer[: self.window_samples].copy()
+            self._buffer = self._buffer[self.hop_samples :]
 
-        self._frame_idx += 1
-        self._current_sample += self.hop_samples
+            if self.incremental:
+                result = self._detector.process_stream_events(
+                    window, start_frame=self._frame_idx
+                )
+            else:
+                result = self._detector.process_stream(
+                    window, start_frame=self._frame_idx
+                )
 
-        return result
+            all_results.extend(result)
+            self._frame_idx += 1
+            self._frames_processed += 1
+            self._current_sample += self.hop_samples
+
+        return all_results
 
     def flush(self, return_seconds: bool = True) -> list:
         """
-        Flush any active segment at end of stream. Call after last __call__.
+        Flush any buffered audio (padded if needed) and active segments.
+        Call after last __call__.
 
         Returns
         -------
         If incremental=False: list of Segment
         If incremental=True: list of {'end': t, 'label': str, 'confidence': float}
         """
+        all_results: list = []
+
+        # Process remaining buffer (pad to full window if needed)
+        if len(self._buffer) > 0:
+            pad_len = self.window_samples - len(self._buffer)
+            window = np.concatenate(
+                [self._buffer, np.zeros(pad_len, dtype=np.float32)]
+            )
+            if self.incremental:
+                result = self._detector.process_stream_events(
+                    window, start_frame=self._frame_idx
+                )
+            else:
+                result = self._detector.process_stream(
+                    window, start_frame=self._frame_idx
+                )
+            all_results.extend(result)
+            self._frame_idx += 1
+            self._frames_processed += 1
+            self._buffer = np.array([], dtype=np.float32)
+
         end_time = self._frame_idx * self.hop_seconds
         if self.incremental:
-            return self._detector.flush_stream_events(end_time)
-        return self._detector.flush_stream(end_time)
+            flush_result = self._detector.flush_stream_events(end_time)
+        else:
+            flush_result = self._detector.flush_stream(end_time)
+        all_results.extend(flush_result)
+
+        return all_results
+
+    @property
+    def frames_processed(self) -> int:
+        """Number of windows processed so far (for reporting)."""
+        return self._frames_processed
